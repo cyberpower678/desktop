@@ -505,14 +505,17 @@ public extension Item {
         }
 
         var newParentItemRemoteUrl: String
+        let newParentIsTrashed: Bool
 
         // The target parent should already be present in our database. The system will have synced
         // remote changes and then, upon user interaction, will try to modify the item.
         // That is, if the parent item has changed at all (it might not have)
         if newParentItemIdentifier == .rootContainer {
             newParentItemRemoteUrl = account.davFilesUrl
+            newParentIsTrashed = false
         } else if newParentItemIdentifier == .trashContainer {
             newParentItemRemoteUrl = account.trashUrl
+            newParentIsTrashed = true
         } else {
             guard let parentItemMetadata = dbManager.directoryMetadata(ocId: newParentItemIdentifier.rawValue) else {
                 logger.error("Not modifying item, could not find metadata for target parentItemIdentifier \"\(newParentItemIdentifier.rawValue)\"!", [.item: modifiedItem])
@@ -523,6 +526,7 @@ public extension Item {
             }
 
             newParentItemRemoteUrl = parentItemMetadata.serverUrl + "/" + parentItemMetadata.fileName
+            newParentIsTrashed = parentItemMetadata.isTrashed
         }
 
         let newServerUrlFileName = newParentItemRemoteUrl + "/" + itemTarget.filename
@@ -635,15 +639,11 @@ public extension Item {
             )
         }
 
-        if changedFields.contains(.parentItemIdentifier)
-            && newParentItemIdentifier == .trashContainer
+        if (changedFields.contains(.parentItemIdentifier) || changedFields.contains(.filename))
+            && newParentIsTrashed
             && modifiedItem.metadata.isTrashed
         {
-            if changedFields.contains(.filename) {
-                logger.error("Tried to modify filename of already trashed item. This is not supported.", [.item: modifiedItem])
-            }
-
-            logger.info("Tried to trash item that is in fact already trashed.", [.item: modifiedItem])
+            logger.info("Keeping the server location of an already trashed item.", [.item: modifiedItem])
 
             return (modifiedItem, nil)
         } else if changedFields.contains(.parentItemIdentifier) && newParentItemIdentifier == .trashContainer {

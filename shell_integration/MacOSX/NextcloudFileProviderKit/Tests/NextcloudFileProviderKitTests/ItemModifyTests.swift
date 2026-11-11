@@ -29,6 +29,77 @@ private final class ExclusionMarkerRecorder: @unchecked Sendable {
 }
 
 final class ItemModifyTests: NextcloudFileProviderKitTestCase {
+    private func assertStructuralChangeWithinTrashDoesNotRestore(
+        moveIntoTrashFolder: Bool,
+        rename: Bool,
+        forceTrashRootParentChange: Bool = false
+    ) async throws {
+        let remoteInterface = MockRemoteInterface(account: Self.account, rootItem: rootItem, rootTrashItem: rootTrashItem)
+        let metadata = remoteTrashItem.toItemMetadata(account: Self.account)
+        Self.dbManager.addItemMetadata(metadata)
+        Self.dbManager.addItemMetadata(remoteTrashFolder.toItemMetadata(account: Self.account))
+
+        let item = Item(
+            metadata: metadata,
+            parentItemIdentifier: .trashContainer,
+            account: Self.account,
+            remoteInterface: remoteInterface,
+            dbManager: Self.dbManager
+        )
+        var targetMetadata = metadata
+        var fields: NSFileProviderItemFields = []
+        if rename {
+            targetMetadata.fileName += " 2"
+            targetMetadata.fileNameView = targetMetadata.fileName
+            targetMetadata.trashbinFileName = targetMetadata.fileName
+            fields.insert(.filename)
+        }
+        if moveIntoTrashFolder || forceTrashRootParentChange {
+            fields.insert(.parentItemIdentifier)
+        }
+        let target = Item(
+            metadata: targetMetadata,
+            parentItemIdentifier: moveIntoTrashFolder ? NSFileProviderItemIdentifier(remoteTrashFolder.identifier) : .trashContainer,
+            account: Self.account,
+            remoteInterface: remoteInterface,
+            dbManager: Self.dbManager
+        )
+
+        let (modified, error) = await item.modify(
+            itemTarget: target,
+            changedFields: fields,
+            contents: nil,
+            dbManager: Self.dbManager
+        )
+
+        XCTAssertNil(error)
+        XCTAssertEqual(remoteInterface.restoreFromTrashCallCount, 0)
+        let result = try XCTUnwrap(modified)
+        XCTAssertTrue(result.metadata.isTrashed)
+        XCTAssertEqual(result.parentItemIdentifier, .trashContainer)
+        XCTAssertEqual(result.metadata.remotePath(), metadata.remotePath())
+        XCTAssertEqual(result.filename, item.filename)
+        XCTAssertTrue(rootTrashItem.children.contains { $0.identifier == remoteTrashItem.identifier })
+        XCTAssertTrue(remoteFolder.children.isEmpty)
+        XCTAssertEqual(remoteTrashItem.remotePath, metadata.remotePath())
+    }
+
+    func testMoveWithinTrashDoesNotRestoreItem() async throws {
+        try await assertStructuralChangeWithinTrashDoesNotRestore(moveIntoTrashFolder: true, rename: false)
+    }
+
+    func testRenameWithinTrashDoesNotMoveRemoteItem() async throws {
+        try await assertStructuralChangeWithinTrashDoesNotRestore(moveIntoTrashFolder: false, rename: true)
+    }
+
+    func testMoveAndRenameWithinTrashDoesNotRestoreItem() async throws {
+        try await assertStructuralChangeWithinTrashDoesNotRestore(moveIntoTrashFolder: true, rename: true)
+    }
+
+    func testMoveAlreadyTrashedItemToTrashRootIsLocalOnly() async throws {
+        try await assertStructuralChangeWithinTrashDoesNotRestore(moveIntoTrashFolder: false, rename: true, forceTrashRootParentChange: true)
+    }
+
     private func assertFailedContentModificationRemainsUnuploaded(
         errorCode: Int,
         chunkSize: Int?,

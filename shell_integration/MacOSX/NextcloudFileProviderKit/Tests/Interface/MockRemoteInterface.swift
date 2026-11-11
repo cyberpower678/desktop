@@ -1444,12 +1444,15 @@ public class MockRemoteInterface: RemoteInterface, @unchecked Sendable {
         return (account, rootTrashItem.children.map { $0.toNKTrash() }, nil, .success)
     }
 
+    public var restoreFromTrashCallCount = 0
+
     public func restoreFromTrash(
         filename: String,
         account: Account,
         options _: NKRequestOptions = .init(),
         taskHandler _: @escaping (URLSessionTask) -> Void = { _ in }
     ) async -> (account: String, data: Data?, error: NKError) {
+        restoreFromTrashCallCount += 1
         let fileTrashUrl = account.trashUrl + "/" + filename
         let fileTrashRestoreUrl = account.trashRestoreUrl + "/" + filename
         let (_, data, error) = await move(
